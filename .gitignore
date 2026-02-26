@@ -5,5 +5,7 @@ history/
 files/
 logs/
 .env
+.env.*
+.claude/
 *.log
 .DS_Store

@@ -132,6 +132,26 @@ Normal WhatsApp multi-device behavior. The message is sent — your phone just t
     └──────────────┘      └───────────────────┘
 ```
 
+## Security
+
+**Read this before running the agent.**
+
+This agent uses `--dangerously-skip-permissions` to allow Claude Code to read/write files and run commands without interactive approval. This is necessary for autonomous operation but means:
+
+- **Claude has full access** to read, write, and execute within your `PROJECT_DIR`
+- **Only add your own number** to `WHATSAPP_NUMBERS`. Anyone on the allowlist can trigger Claude actions on your machine
+- **Do not point `PROJECT_DIR`** to sensitive directories (home dir, `/`, etc.). Use a dedicated project folder
+- **Do not run as root**. Use a regular user account
+- **Conversation history and logs** are stored in plaintext. Keep the agent directory secure
+
+**Best practices:**
+
+1. Use a dedicated, sandboxed directory for `PROJECT_DIR`
+2. Keep the allowlist minimal — only trusted numbers
+3. Run on a machine you control, not a shared server
+4. Review `logs/agent.log` periodically
+5. If you stop using the agent, delete `auth_info/` to revoke the WhatsApp session
+
 ## Disclaimer
 
 This project uses [Baileys](https://github.com/WhiskeySockets/Baileys), an unofficial WhatsApp Web API library. It is **not affiliated with or endorsed by WhatsApp or Meta**. Use responsibly and at your own risk. Do not use for spam or automated mass messaging.

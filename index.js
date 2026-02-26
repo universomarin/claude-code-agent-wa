@@ -46,14 +46,18 @@ function validateConfig() {
 }
 
 // ─── History ────────────────────────────────────────────────────
+function sanitizeChatId(chatId) {
+  return chatId.replace(/[^a-zA-Z0-9@._-]/g, '_');
+}
+
 function getHistory(chatId) {
-  const file = path.join(HISTORY_DIR, `${chatId}.json`);
+  const file = path.join(HISTORY_DIR, `${sanitizeChatId(chatId)}.json`);
   if (!fs.existsSync(file)) return [];
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return []; }
 }
 
 function saveHistory(chatId, history) {
-  const file = path.join(HISTORY_DIR, `${chatId}.json`);
+  const file = path.join(HISTORY_DIR, `${sanitizeChatId(chatId)}.json`);
   fs.writeFileSync(file, JSON.stringify(history.slice(-config.MAX_HISTORY), null, 2));
 }
 
@@ -66,7 +70,7 @@ async function processQueue(sock) {
   processing = true;
 
   while (messageQueue.length > 0) {
-    const { chatId, text, fromMe, wasAudio } = messageQueue.shift();
+    const { chatId, text, fromMe, wasAudio, imagePath } = messageQueue.shift();
     try {
       await sock.presenceSubscribe(chatId);
       await sock.sendPresenceUpdate('composing', chatId);
@@ -100,17 +104,29 @@ async function processQueue(sock) {
       // Detect file attachments [FILE:/path/to/file.pdf]
       const fileMatches = response.match(/\[FILE:([^\]]+)\]/g);
       if (fileMatches) {
+        const allowedDir = path.resolve(config.FILES_DIR);
         for (const match of fileMatches) {
           const filePath = match.replace('[FILE:', '').replace(']', '').trim();
-          if (fs.existsSync(filePath)) {
-            const fileBuffer = fs.readFileSync(filePath);
-            const fileName = path.basename(filePath);
-            const ext = path.extname(filePath).toLowerCase();
+          const resolvedPath = path.resolve(filePath);
+          // Security: only allow files inside FILES_DIR
+          if (!resolvedPath.startsWith(allowedDir + path.sep) && resolvedPath !== allowedDir) {
+            log(`Blocked file outside FILES_DIR: ${filePath}`);
+            continue;
+          }
+          if (fs.existsSync(resolvedPath)) {
+            const fileBuffer = fs.readFileSync(resolvedPath);
+            const fileName = path.basename(resolvedPath);
+            const ext = path.extname(resolvedPath).toLowerCase();
             const mimeTypes = { '.pdf': 'application/pdf', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg' };
             await sock.sendMessage(chatId, { document: fileBuffer, mimetype: mimeTypes[ext] || 'application/octet-stream', fileName });
             log(`File sent: ${fileName}`);
           }
         }
+      }
+
+      // Clean up downloaded image after processing
+      if (imagePath) {
+        try { fs.unlinkSync(imagePath); } catch {}
       }
 
       history.push({ text, fromMe, reply: response, timestamp: Date.now() });
@@ -323,7 +339,7 @@ async function startDaemon() {
         continue;
       }
 
-      messageQueue.push({ chatId, text, fromMe, wasAudio: isAudio });
+      messageQueue.push({ chatId, text, fromMe, wasAudio: isAudio, imagePath: isImage ? text.match(/\[Image at: ([^\]]+)\]/)?.[1] : null });
       processQueue(sock);
     }
   });
