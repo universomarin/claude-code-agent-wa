@@ -1,0 +1,33 @@
+{
+  "name": "claude-code-agent-wa",
+  "version": "1.0.0",
+  "description": "WhatsApp AI agent powered by your Claude Code subscription — text, voice, vision, PDF generation. Zero API tokens.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "claude",
+    "claude-code",
+    "ai",
+    "voice",
+    "baileys",
+    "agent",
+    "whisper",
+    "elevenlabs",
+    "chatbot"
+  ],
+  "author": "universomarin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/universomarin/claude-code-agent-wa"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

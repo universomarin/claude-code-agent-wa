@@ -1,0 +1,9 @@
+node_modules/
+auth_info/
+audio_tmp/
+history/
+files/
+logs/
+.env
+*.log
+.DS_Store
