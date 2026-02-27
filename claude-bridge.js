@@ -39,7 +39,8 @@ function askClaude(message, history) {
     const proc = spawn(config.CLAUDE_PATH, args, {
       cwd: config.PROJECT_DIR,
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: config.CLAUDE_TIMEOUT
+      timeout: config.CLAUDE_TIMEOUT,
+      env: { ...process.env, CLAUDECODE: '' }
     });
 
     proc.stdout.on('data', (data) => { stdout += data.toString(); });

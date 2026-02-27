@@ -174,10 +174,11 @@ async function transcribeAudio(msg, sock) {
       reuploadRequest: sock.updateMediaMessage
     });
     fs.writeFileSync(oggPath, buffer);
-    if (buffer.length < 100) throw new Error('Downloaded audio is empty or corrupt');
+    log(`Audio downloaded: ${buffer.length} bytes`);
+    if (buffer.length < 100) throw new Error(`Downloaded audio too small: ${buffer.length} bytes`);
 
-    execSync(`ffmpeg -i "${oggPath}" -ar 16000 -ac 1 "${wavPath}" -y 2>/dev/null`);
-    execSync(`whisper "${wavPath}" --model base --output_format txt --output_dir "${AUDIO_DIR}" 2>/dev/null`, { encoding: 'utf-8', timeout: 60000 });
+    execSync(`ffmpeg -i "${oggPath}" -ar 16000 -ac 1 "${wavPath}" -y 2>&1`);
+    execSync(`whisper "${wavPath}" --model base --output_format txt --output_dir "${AUDIO_DIR}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
 
     const txtPath = path.join(AUDIO_DIR, `${ts}.txt`);
     if (fs.existsSync(txtPath)) return fs.readFileSync(txtPath, 'utf-8').trim();
@@ -208,7 +209,15 @@ function clearAuthState() {
 }
 
 // ─── Main daemon ────────────────────────────────────────────────
+let activeSock = null;
+
 async function startDaemon() {
+  // Clean up previous socket to prevent ghost listeners
+  if (activeSock) {
+    try { activeSock.ev.removeAllListeners(); activeSock.ws.close(); } catch {}
+    activeSock = null;
+  }
+
   log('Starting agent...');
 
   for (const dir of [config.LOG_DIR, HISTORY_DIR, AUTH_DIR, AUDIO_DIR, config.FILES_DIR]) {
@@ -225,6 +234,7 @@ async function startDaemon() {
     printQRInTerminal: false,
     generateHighQualityLinkPreview: false
   });
+  activeSock = sock;
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -237,24 +247,27 @@ async function startDaemon() {
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      log(`Connection closed (status: ${statusCode}, shouldReconnect: ${shouldReconnect})`);
 
-      // Status 440 = session expired, 401 = logged out
-      if (statusCode === 440 || statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
+      // Status 401 = logged out — session is truly dead
+      if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
         clearAuthState();
         startDaemon();
         return;
       }
 
-      reconnectAttempts++;
-      if (reconnectAttempts >= MAX_RECONNECTS) {
-        log(`Failed to reconnect after ${MAX_RECONNECTS} attempts.`);
-        clearAuthState();
-        startDaemon();
+      // Status 440/515 = session needs refresh, just reconnect (don't clear auth)
+      if (shouldReconnect) {
+        reconnectAttempts++;
+        if (reconnectAttempts >= MAX_RECONNECTS) {
+          log(`Failed to reconnect after ${MAX_RECONNECTS} attempts. Clearing session.`);
+          clearAuthState();
+        }
+        log(`Reconnecting (${reconnectAttempts}/${MAX_RECONNECTS})...`);
+        setTimeout(startDaemon, 3000);
         return;
       }
-
-      log(`Connection closed (status: ${statusCode}). Reconnecting (${reconnectAttempts}/${MAX_RECONNECTS})...`);
-      setTimeout(startDaemon, 5000);
     }
 
     if (connection === 'open') {
@@ -325,7 +338,7 @@ async function startDaemon() {
 
       if (!text) continue;
 
-      // Skip daemon's own messages
+      // Skip daemon's own messages (prevent loops)
       if (fromMe && (text.startsWith('Error processing') || text.startsWith('Could not understand'))) continue;
 
       // Commands
@@ -344,6 +357,19 @@ async function startDaemon() {
     }
   });
 }
+
+// ─── Prevent Baileys internal crashes from killing the process ──
+process.on('uncaughtException', (err) => {
+  if (err.isBoom || err.message?.includes('Connection Closed')) {
+    log(`Baileys internal error (handled): ${err.message}`);
+    return;
+  }
+  log(`Uncaught exception: ${err.message}`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  log(`Unhandled rejection (handled): ${err?.message || err}`);
+});
 
 // ─── Start ──────────────────────────────────────────────────────
 validateConfig();
