@@ -82,19 +82,37 @@ Send these in WhatsApp:
 | `/ping` | Check if the agent is running |
 | `/clear` | Clear conversation history |
 
+## Important: WhatsApp Session
+
+This agent connects to WhatsApp as a **linked device** (like WhatsApp Web). Keep in mind:
+
+- **If you remove linked devices** from your phone (Settings > Linked Devices), the agent's session is revoked. You must delete `auth_info/` and restart to scan a new QR code.
+- **Only one Baileys-based service** can be connected to your WhatsApp at a time. If you have another bot (e.g., OpenClaw), disconnect it first — otherwise they will conflict and create message loops.
+- **The `auth_info/` folder** contains your WhatsApp session keys. Do not share it. If compromised, remove the linked device from your phone immediately.
+- **If your computer sleeps or loses internet**, the agent reconnects automatically. But after long disconnections, WhatsApp may expire the session — just delete `auth_info/` and re-scan.
+
 ## Troubleshooting
 
 **QR code keeps appearing / status 440 loop**
-Session expired. The agent now handles this automatically — it clears the old session and shows a new QR code. If stuck, manually delete `auth_info/` and restart.
+Session expired. The agent handles this automatically — it clears the old session and shows a new QR code. If stuck, manually run `rm -rf auth_info/` and restart.
+
+**Agent doesn't respond after restarting**
+Your WhatsApp session may be stale. Delete `auth_info/` and restart to get a fresh QR code.
 
 **Claude times out**
 Increase `CLAUDE_TIMEOUT` in `.env` or switch to `CLAUDE_MODEL=sonnet` for faster responses.
 
 **Voice notes not working**
-Make sure `ffmpeg` and `whisper` are installed and in your PATH.
+Make sure `ffmpeg` and `whisper` are installed and in your PATH. Run `ffmpeg -version` and `whisper --help` to verify.
+
+**Message loops (agent keeps replying to itself)**
+Another bot is connected to your WhatsApp and generating messages. Disconnect it first, then restart the agent.
 
 **"Waiting for message" on phone**
 Normal WhatsApp multi-device behavior. The message is sent — your phone just takes a moment to decrypt it. Check WhatsApp Web to confirm.
+
+**"Cannot be launched inside another Claude Code session"**
+The agent is being started from within Claude Code. The agent handles this automatically, but if it happens, set `CLAUDECODE=` in your environment before running.
 
 ## Architecture
 
