@@ -13,10 +13,13 @@ function buildPrompt(message, history) {
 
   if (history && history.length > 0) {
     prompt += 'Recent conversation history:\n';
-    for (const msg of history) {
-      prompt += `User: ${msg.text}\n`;
+    // Only send last 10 messages, truncate long ones to keep prompt lean
+    for (const msg of history.slice(-10)) {
+      const userText = msg.text.length > 500 ? msg.text.substring(0, 500) + '...' : msg.text;
+      prompt += `User: ${userText}\n`;
       if (msg.reply) {
-        prompt += `Assistant: ${msg.reply}\n`;
+        const replyText = msg.reply.length > 500 ? msg.reply.substring(0, 500) + '...' : msg.reply;
+        prompt += `Assistant: ${replyText}\n`;
       }
     }
     prompt += '\n';
@@ -33,7 +36,8 @@ function askClaude(message, history) {
     let stdout = '';
     let stderr = '';
 
-    const args = ['-p', '--dangerously-skip-permissions'];
+    const maxTurns = config.MAX_TURNS || 25;
+    const args = ['-p', '--dangerously-skip-permissions', '--max-turns', String(maxTurns)];
     if (config.CLAUDE_MODEL) args.push('--model', config.CLAUDE_MODEL);
 
     const proc = spawn(config.CLAUDE_PATH, args, {

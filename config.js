@@ -26,6 +26,7 @@ module.exports = {
   CLAUDE_TIMEOUT: parseInt(process.env.CLAUDE_TIMEOUT || '300000'), // 5 min
   CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'sonnet',
   CLAUDE_PATH: process.env.CLAUDE_CLI_PATH || claudePath,
+  MAX_TURNS: parseInt(process.env.MAX_TURNS || '25'), // max tool-use rounds per message
 
   // System prompt for the AI assistant
   SYSTEM_PROMPT: process.env.SYSTEM_PROMPT ||
