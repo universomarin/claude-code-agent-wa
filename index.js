@@ -13,14 +13,21 @@ const HISTORY_DIR = './history';
 const AUTH_DIR = './auth_info';
 
 // ─── Suppress Baileys internal noise ────────────────────────────
-const NOISE = ['Closing session', 'SessionEntry', 'Decrypted message', 'Bad MAC', 'Failed to decrypt', 'Session error', 'Closing open session', 'pendingPreKey', 'registrationId', 'ephemeralKeyPair', '_chains', 'chainKey', 'rootKey', 'baseKey'];
+const NOISE = ['Closing session', 'SessionEntry', 'Decrypted message', 'Bad MAC', 'Failed to decrypt', 'Session error', 'Closing open session', 'pendingPreKey', 'registrationId', 'ephemeralKeyPair', '_chains', 'chainKey', 'rootKey', 'baseKey', 'indexInfo', 'currentRatchet'];
 const isNoise = (msg) => NOISE.some(p => (msg || '').includes(p));
+const isNoiseArgs = (...a) => a.some(arg => isNoise(typeof arg === 'string' ? arg : JSON.stringify(arg).substring(0, 200)));
 const _log = console.log;
 const _err = console.error;
 const _warn = console.warn;
-console.log = (...a) => { if (!isNoise(a[0]?.toString())) _log(...a); };
-console.error = (...a) => { if (!isNoise(a[0]?.toString())) _err(...a); };
-console.warn = (...a) => { if (!isNoise(a[0]?.toString())) _warn(...a); };
+console.log = (...a) => { if (!isNoiseArgs(...a)) _log(...a); };
+console.error = (...a) => { if (!isNoiseArgs(...a)) _err(...a); };
+console.warn = (...a) => { if (!isNoiseArgs(...a)) _warn(...a); };
+// Also intercept direct stdout writes from Baileys signal protocol
+const _stdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = function(chunk, ...args) {
+  if (typeof chunk === 'string' && isNoise(chunk)) return true;
+  return _stdoutWrite(chunk, ...args);
+};
 
 // ─── Logger ─────────────────────────────────────────────────────
 const logger = pino({ level: 'silent' });
@@ -137,7 +144,11 @@ async function processQueue(sock) {
     } catch (err) {
       log(`Error: ${err.message}`);
       try { await sock.sendPresenceUpdate('paused', chatId); } catch {}
-      try { await sock.sendMessage(chatId, { text: 'Error processing your message. Please try again.' }); } catch {}
+      const isTimeout = err.message?.includes('exit 143') || err.message?.includes('SIGTERM') || err.message?.includes('timeout');
+      const errorMsg = isTimeout
+        ? 'Response timed out. Try a shorter or more specific message.'
+        : 'Error processing your message. Please try again.';
+      try { await sock.sendMessage(chatId, { text: errorMsg }); } catch {}
     }
   }
 
