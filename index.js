@@ -88,6 +88,10 @@ async function processQueue(sock) {
 
       await sock.sendPresenceUpdate('paused', chatId);
 
+      // Strip [FILE:] tags from text response (files are sent as attachments below)
+      const fileMatches = response.match(/\[FILE:([^\]]+)\]/g);
+      const cleanResponse = response.replace(/\[FILE:[^\]]+\]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+
       // Voice reply
       const shouldSendAudio = config.VOICE_REPLY_MODE === 'always'
         || (config.VOICE_REPLY_MODE === 'auto' && wasAudio);
@@ -95,29 +99,35 @@ async function processQueue(sock) {
       if (shouldSendAudio && config.ELEVENLABS_API_KEY) {
         try {
           log('Generating voice response...');
-          const audioPath = await textToSpeech(response);
+          const audioPath = await textToSpeech(cleanResponse);
           const audioBuffer = fs.readFileSync(audioPath);
           await sock.sendMessage(chatId, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
           try { fs.unlinkSync(audioPath); } catch {}
           log('Voice sent.');
         } catch (ttsErr) {
           log(`TTS failed, sending text: ${ttsErr.message}`);
-          await sendTextChunks(sock, chatId, response);
+          await sendTextChunks(sock, chatId, cleanResponse);
         }
       } else {
-        await sendTextChunks(sock, chatId, response);
+        if (cleanResponse) await sendTextChunks(sock, chatId, cleanResponse);
       }
 
-      // Detect file attachments [FILE:/path/to/file.pdf]
-      const fileMatches = response.match(/\[FILE:([^\]]+)\]/g);
+      // Send file attachments
       if (fileMatches) {
-        const allowedDir = path.resolve(config.FILES_DIR);
+        const allowedDirs = [
+          path.resolve(config.FILES_DIR),
+          path.resolve(config.PROJECT_DIR),
+        ].filter(Boolean);
+
         for (const match of fileMatches) {
           const filePath = match.replace('[FILE:', '').replace(']', '').trim();
           const resolvedPath = path.resolve(filePath);
-          // Security: only allow files inside FILES_DIR
-          if (!resolvedPath.startsWith(allowedDir + path.sep) && resolvedPath !== allowedDir) {
-            log(`Blocked file outside FILES_DIR: ${filePath}`);
+          // Security: only allow files inside allowed directories
+          const isAllowedPath = allowedDirs.some(dir =>
+            resolvedPath.startsWith(dir + path.sep) || resolvedPath === dir
+          );
+          if (!isAllowedPath) {
+            log(`Blocked file outside allowed dirs: ${filePath}`);
             continue;
           }
           if (fs.existsSync(resolvedPath)) {
@@ -127,6 +137,8 @@ async function processQueue(sock) {
             const mimeTypes = { '.pdf': 'application/pdf', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg' };
             await sock.sendMessage(chatId, { document: fileBuffer, mimetype: mimeTypes[ext] || 'application/octet-stream', fileName });
             log(`File sent: ${fileName}`);
+          } else {
+            log(`File not found: ${resolvedPath}`);
           }
         }
       }
