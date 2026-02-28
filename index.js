@@ -70,7 +70,7 @@ async function processQueue(sock) {
   processing = true;
 
   while (messageQueue.length > 0) {
-    const { chatId, text, fromMe, wasAudio, imagePath } = messageQueue.shift();
+    const { chatId, text, fromMe, wasAudio, cleanupPaths } = messageQueue.shift();
     try {
       await sock.presenceSubscribe(chatId);
       await sock.sendPresenceUpdate('composing', chatId);
@@ -124,9 +124,11 @@ async function processQueue(sock) {
         }
       }
 
-      // Clean up downloaded image after processing
-      if (imagePath) {
-        try { fs.unlinkSync(imagePath); } catch {}
+      // Clean up downloaded media after processing
+      if (cleanupPaths && cleanupPaths.length > 0) {
+        for (const p of cleanupPaths) {
+          try { fs.rmSync(p, { recursive: true, force: true }); } catch {}
+        }
       }
 
       history.push({ text, fromMe, reply: response, timestamp: Date.now() });
@@ -332,8 +334,71 @@ async function startDaemon() {
         }
       }
 
-      if (isVideo && !text) {
-        text = '[Video sent without caption]';
+      // Download videos: extract frames + transcribe audio
+      if (isVideo) {
+        log('Video received, downloading...');
+        try {
+          const vidBuffer = await downloadMediaMessage(msg, 'buffer', {}, {
+            logger: pino({ level: 'silent' }),
+            reuploadRequest: sock.updateMediaMessage
+          });
+          const ts = Date.now();
+          const vidPath = path.resolve(AUDIO_DIR, `vid_${ts}.mp4`);
+          fs.writeFileSync(vidPath, vidBuffer);
+          log(`Video downloaded: ${vidBuffer.length} bytes`);
+
+          // Extract 4 evenly spaced frames
+          const framesDir = path.resolve(AUDIO_DIR, `frames_${ts}`);
+          fs.mkdirSync(framesDir, { recursive: true });
+          try {
+            execSync(`ffmpeg -i "${vidPath}" -vf "select='eq(n\\,0)+eq(n\\,30)+eq(n\\,60)+eq(n\\,90)',setpts=N/FRAME_RATE/TB" -frames:v 4 "${framesDir}/frame_%02d.jpg" -y 2>&1`, { timeout: 30000 });
+          } catch {
+            execSync(`ffmpeg -i "${vidPath}" -vf "fps=1/2" -frames:v 4 "${framesDir}/frame_%02d.jpg" -y 2>&1`, { timeout: 30000 });
+          }
+
+          // Extract and transcribe audio track
+          let audioTranscription = '';
+          const wavPath = path.resolve(AUDIO_DIR, `vid_audio_${ts}.wav`);
+          try {
+            execSync(`ffmpeg -i "${vidPath}" -vn -ar 16000 -ac 1 "${wavPath}" -y 2>&1`, { timeout: 30000 });
+            const wavSize = fs.statSync(wavPath).size;
+            if (wavSize > 1000) {
+              execSync(`whisper "${wavPath}" --model base --output_format txt --output_dir "${AUDIO_DIR}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
+              const txtPath = path.resolve(AUDIO_DIR, `vid_audio_${ts}.txt`);
+              if (fs.existsSync(txtPath)) {
+                audioTranscription = fs.readFileSync(txtPath, 'utf-8').trim();
+                try { fs.unlinkSync(txtPath); } catch {}
+              }
+            }
+            try { fs.unlinkSync(wavPath); } catch {}
+          } catch (e) {
+            log(`Video audio extraction: ${e.message}`);
+            try { fs.unlinkSync(wavPath); } catch {}
+          }
+
+          const frames = fs.readdirSync(framesDir).filter(f => f.endsWith('.jpg')).sort();
+          const framePaths = frames.map(f => path.join(framesDir, f));
+          const caption = text || '';
+
+          let vidParts = [];
+          if (framePaths.length > 0) {
+            const frameList = framePaths.map((fp, i) => `Frame ${i + 1}: ${fp}`).join('\n');
+            vidParts.push(`[Video frames]\n${frameList}\nRead each frame with your Read tool.`);
+          }
+          if (audioTranscription) {
+            vidParts.push(`[Video audio transcription] ${audioTranscription}`);
+            log(`Video audio transcribed: ${audioTranscription.substring(0, 80)}...`);
+          }
+          if (caption) vidParts.push(`Caption: ${caption}`);
+          if (vidParts.length === 0 && !caption) vidParts.push('[Video sent but could not be processed]');
+
+          text = vidParts.join('\n') + '\nAnalyze both the visual frames and audio content of this video.';
+
+          try { fs.unlinkSync(vidPath); } catch {}
+        } catch (err) {
+          log(`Video processing error: ${err.message}`);
+          if (!text) text = '[Video sent but could not be processed]';
+        }
       }
 
       if (!text) continue;
@@ -352,7 +417,18 @@ async function startDaemon() {
         continue;
       }
 
-      messageQueue.push({ chatId, text, fromMe, wasAudio: isAudio, imagePath: isImage ? text.match(/\[Image at: ([^\]]+)\]/)?.[1] : null });
+      let cleanupPaths = [];
+      if (isImage) {
+        const imgMatch = text.match(/\[Image at: ([^\]]+)\]/);
+        if (imgMatch) cleanupPaths.push(imgMatch[1]);
+      }
+      if (isVideo) {
+        const framePaths = (text.match(/Frame \d+: (.+)/g) || []).map(m => m.replace(/Frame \d+: /, ''));
+        cleanupPaths.push(...framePaths);
+        if (framePaths[0]) cleanupPaths.push(path.dirname(framePaths[0]));
+      }
+
+      messageQueue.push({ chatId, text, fromMe, wasAudio: isAudio, cleanupPaths });
       processQueue(sock);
     }
   });

@@ -13,6 +13,7 @@ WhatsApp ←→ Baileys ←→ Node.js ←→ claude -p (subscription) ←→ Re
 - **Text chat** — Send a message, get an AI response with full project context
 - **Voice notes** — Whisper transcribes incoming audio, Claude responds, ElevenLabs speaks back
 - **Image vision** — Send an image, Claude sees and analyzes it
+- **Video processing** — Extracts visual frames + transcribes audio from videos
 - **PDF generation** — Ask for a proposal/quote, get a professional PDF delivered via WhatsApp
 - **Conversation history** — Remembers the last 20 messages per chat
 - **File attachments** — Claude can create and send files (PDF, HTML, images)
@@ -120,7 +121,7 @@ The agent is being started from within Claude Code. The agent handles this autom
 ┌──────────────────────────────────────────────────────────┐
 │                     WhatsApp                              │
 └────────┬──────────────────┬──────────────────┬───────────┘
-         │ Text             │ Voice            │ Image
+         │ Text             │ Voice/Video      │ Image
          ▼                  ▼                  ▼
 ┌──────────────────────────────────────────────────────────┐
 │                  Baileys (Node.js)                        │
@@ -128,8 +129,8 @@ The agent is being started from within Claude Code. The agent handles this autom
 └────────┬──────────────────┬──────────────────┬───────────┘
          │                  │                  │
          │           ┌──────▼──────┐    ┌──────▼──────┐
-         │           │   Whisper   │    │  Download   │
-         │           │  (local)    │    │  to disk    │
+         │           │  Whisper +  │    │  Download   │
+         │           │  ffmpeg     │    │  to disk    │
          │           └──────┬──────┘    └──────┬──────┘
          │                  │ text             │ path
          ▼                  ▼                  ▼
